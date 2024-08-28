@@ -1,27 +1,19 @@
-/*
-Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
-
-Licensed under the Apache License, Version 2.0 (the "License"). You may not use this file except in compliance with the License. A copy of the License is located at
-
-    http://aws.amazon.com/apache2.0/
-
-or in the "license" file accompanying this file. This file is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.
-
-*/
-
 // Define our dependencies
-var express        = require('express');
-var session        = require('express-session');
-var passport       = require('passport');
-var OAuth2Strategy = require('passport-oauth').OAuth2Strategy;
-var request        = require('request');
-var handlebars     = require('handlebars');
+var express=require('express');
+var session=require('express-session');
+var passport=require('passport');
+var OAuth2Strategy=require('passport-oauth').OAuth2Strategy;
+var request=require('request');
+require('dotenv').config();
+const port = 3000;
+const proxy = "http://localhost:3000";
+const { buildLinks } = require("./scripts/modules");
 
 // Define our constants, you will change these with your own
-const TWITCH_CLIENT_ID = '<YOUR CLIENT ID HERE>';
-const TWITCH_SECRET    = '<YOUR CLIENT SECRET HERE>';
-const SESSION_SECRET   = '<SOME SECRET HERE>';
-const CALLBACK_URL     = '<YOUR REDIRECT URL HERE>';  // You can run locally with - http://localhost:3000/auth/twitch/callback
+const TWITCH_CLIENT_ID = process.env.TWITCH_CLIENT_ID;
+const TWITCH_SECRET = process.env.TWITCH_SECRET;
+const SESSION_SECRET = process.env.SESSION_SECRET;
+const CALLBACK_URL = proxy + "/auth/twitch/callback";
 
 // Initialize Express and middlewares
 var app = express();
@@ -86,26 +78,42 @@ app.get('/auth/twitch', passport.authenticate('twitch', { scope: 'user_read' }))
 // Set route for OAuth redirect
 app.get('/auth/twitch/callback', passport.authenticate('twitch', { successRedirect: '/', failureRedirect: '/' }));
 
-// Define a simple template to safely generate HTML with values from user's profile
-var template = handlebars.compile(`
-<html><head><title>Twitch Auth Sample</title></head>
-<table>
-    <tr><th>Access Token</th><td>{{accessToken}}</td></tr>
-    <tr><th>Refresh Token</th><td>{{refreshToken}}</td></tr>
-    <tr><th>Display Name</th><td>{{display_name}}</td></tr>
-    <tr><th>Bio</th><td>{{bio}}</td></tr>
-    <tr><th>Image</th><td>{{logo}}</td></tr>
-</table></html>`);
-
 // If user has an authenticated session, display it, otherwise display link to authenticate
 app.get('/', function (req, res) {
   if(req.session && req.session.passport && req.session.passport.user) {
-    res.send(template(req.session.passport.user));
+    console.log(req.session.passport);
+    res.send(buildLinks([
+      "/channel_info",
+    ]));
   } else {
-    res.send('<html><head><title>Twitch Auth Sample</title></head><a href="/auth/twitch"><img src="http://ttv-api.s3.amazonaws.com/assets/connect_dark.png"></a></html>');
+    res.send(`
+      <a href="/auth/twitch">${proxy + "/auth/twitch"}</a>
+      `);
   }
 });
 
-app.listen(3000, function () {
-  console.log('Twitch auth sample listening on port 3000!')
+app.get('/channel_info', async function (req, res) {
+  const accessToken = req.session.passport.user.accessToken;
+  const url = `https://api.twitch.tv/helix/channels?broadcaster_id=${process.env.BROADCASTER_ID}`;
+  try {
+    await fetch(url, {
+      headers: {
+        'Client-Id': TWITCH_CLIENT_ID,
+        'Authorization': "Bearer " + accessToken
+      }
+    })
+      .then(async (response) => {
+        data = await response.json();
+        res.send(data);
+      })
+      .catch((error) => {
+        console.log("Error: " + error);
+      })
+  } catch (error) {
+    console.error(error.message);
+  }
+});
+
+app.listen(port, function () {
+  console.log(`Server running on port: ${port}!`)
 });
