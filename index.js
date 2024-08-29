@@ -6,8 +6,13 @@ var OAuth2Strategy=require('passport-oauth').OAuth2Strategy;
 var request=require('request');
 require('dotenv').config();
 const port = 3000;
-const proxy = "http://localhost:3000";
-const { buildLinks } = require("./scripts/modules");
+const proxy = `http://localhost:${port}`;
+const { 
+  buildLinks,
+  getID,
+  verifySignature
+ } = require("./scripts/modules");
+let OPTIONS = {};
 
 // Define our constants, you will change these with your own
 const TWITCH_CLIENT_ID = process.env.TWITCH_CLIENT_ID;
@@ -73,7 +78,7 @@ passport.use('twitch', new OAuth2Strategy({
 ));
 
 // Set route to start OAuth link, this is where you define scopes to request
-app.get('/auth/twitch', passport.authenticate('twitch', { scope: 'user_read' }));
+app.get('/auth/twitch', passport.authenticate('twitch', { scope: 'user_read channel:read:redemptions' }));
 
 // Set route for OAuth redirect
 app.get('/auth/twitch/callback', passport.authenticate('twitch', { successRedirect: '/', failureRedirect: '/' }));
@@ -81,10 +86,20 @@ app.get('/auth/twitch/callback', passport.authenticate('twitch', { successRedire
 // If user has an authenticated session, display it, otherwise display link to authenticate
 app.get('/', function (req, res) {
   if(req.session && req.session.passport && req.session.passport.user) {
-    console.log(req.session.passport);
-    res.send(buildLinks([
-      "/channel_info",
-    ]));
+    // console.log(req.session.passport);
+    OPTIONS = {
+      method: "GET",
+      headers: {
+        'Client-Id': TWITCH_CLIENT_ID,
+        'Authorization': "Bearer " + req.session.passport.user.accessToken
+      }
+    };
+    req
+    res.send(buildLinks(
+      "/api/channel_info",
+      "/api/streams",
+      "/api/redeemlist"
+    ));
   } else {
     res.send(`
       <a href="/auth/twitch">${proxy + "/auth/twitch"}</a>
@@ -92,28 +107,96 @@ app.get('/', function (req, res) {
   }
 });
 
-app.get('/channel_info', async function (req, res) {
-  const accessToken = req.session.passport.user.accessToken;
-  const url = `https://api.twitch.tv/helix/channels?broadcaster_id=${process.env.BROADCASTER_ID}`;
+app.get('/api/channel_info', async function (req, res) {
+  const username = req.query.username ? req.query.username : "sireoh";
+  let id;
+
   try {
-    await fetch(url, {
-      headers: {
-        'Client-Id': TWITCH_CLIENT_ID,
-        'Authorization': "Bearer " + accessToken
-      }
-    })
-      .then(async (response) => {
-        data = await response.json();
-        res.send(data);
-      })
-      .catch((error) => {
-        console.log("Error: " + error);
-      })
+    id = await getID(username, OPTIONS);
   } catch (error) {
-    console.error(error.message);
+    console.log("id not found", error);
+  }
+
+  if (id) {
+    const url = `https://api.twitch.tv/helix/channels?broadcaster_id=${id}`;
+    try {
+      await fetch(url, OPTIONS)
+        .then(async (response) => {
+          data = await response.json();
+          res.send(data);
+        })
+        .catch((error) => {
+          console.log("Error: " + error);
+        })
+    } catch (error) {
+      console.error(error.message);
+    }
+  }
+});
+
+app.get('/api/streams', async function (req, res) {
+  const usernames = [
+    "sireoh",
+    "froggythighs",
+    "is_my_nan_0",
+    "meeshchannel",
+    "DemonRebuilt"
+  ];
+
+  try {
+    let ids = await Promise.all(
+      usernames.map(async (user) => {
+        try {
+          const id = await getID(user, OPTIONS);
+          return { username: user, id: id };
+        } catch (error) {
+          console.error("Error fetching ID for user:", user, error);
+          return null;
+        }
+      })
+    );
+    res.send(ids);
+  } catch (error) {
+    console.error("An error occurred:", error);
+    res.status(500).send({ status: "error", message: "Internal Server Error" });
+  }
+});
+
+app.get('/api/redeemlist', async function (req, res) {
+  const username = req.query.username ? req.query.username : "sireoh";
+  let id;
+
+  try {
+    id = await getID(username, OPTIONS);
+  } catch (error) {
+    console.log("id not found", error);
+  }
+
+  if (id) {
+    const url = `https://api.twitch.tv/helix/channel_points/custom_rewards?broadcaster_id=${id}`;
+    try {
+      const response = await fetch(url, OPTIONS);
+      const result = await response.json();
+
+      if (!result.data) {
+        return res.status(404).send("No data found");
+      }
+
+      const rewards = result.data.map((item) => ({
+        reward: [item.title, item.prompt],
+        id: item.id
+      }));
+
+      res.send(rewards);
+    } catch (error) {
+      console.error("Error fetching rewards:", error.message);
+      res.status(500).send("Error fetching rewards");
+    }
+  } else {
+    res.status(404).send("User ID not found");
   }
 });
 
 app.listen(port, function () {
-  console.log(`Server running on port: ${port}!`)
+  console.log(`Server running on: ${proxy}!`)
 });
