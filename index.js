@@ -10,7 +10,7 @@ const proxy = `http://localhost:${port}`;
 const { 
   buildLinks,
   getID,
-  verifySignature
+  shoutOut,
  } = require("./scripts/modules");
 let OPTIONS = {};
 
@@ -98,7 +98,8 @@ app.get('/', function (req, res) {
     res.send(buildLinks(
       "/api/channel_info",
       "/api/streams",
-      "/api/redeemlist"
+      "/api/redeemlist",
+      "/shoutout"
     ));
   } else {
     res.send(`
@@ -195,6 +196,11 @@ app.get('/api/redeemlist', async function (req, res) {
   } else {
     res.status(404).send("User ID not found");
   }
+});
+
+app.get("/shoutout", async (req, res) => {
+  const username = req.query.username ? req.query.username : "sireoh";
+  res.send({message: await shoutOut(username, OPTIONS)});
 });
 
 app.listen(port, function () {

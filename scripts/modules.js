@@ -1,11 +1,17 @@
 const proxy = "http://localhost:3000";
 
 function buildLinks(...args) {
-    let str = "<ul>";
+    let str = `<ul
+        style='
+            list-style: none;
+            padding-left: 0;
+            margin-left: 0;
+        '
+    >`;
     args.forEach((link) => {
         str += `
             <li>
-                <a href="${link}">${proxy + link}</a>
+                <a href="${link}">${link.includes("/api/") ? link.split("/api/")[1] : link.substring(1)}</a>
             </li>
         `;
     });
@@ -21,7 +27,6 @@ async function getID(username, OPTIONS) {
         if (result && result.data && result.data.length > 0) {
             return result.data[0].id;
         } else {
-            console.log("No user data found.");
             return undefined;
         }
     } catch (error) {
@@ -30,16 +35,38 @@ async function getID(username, OPTIONS) {
     }
 }
 
-function verifySignature(messageSignature, messageID, messageTimestamp, body) {
-    let message = messageID + messageTimestamp + body
-    let signature = crypto.createHmac('sha256', "keepItSecretKeepItSafe").update(message) // Remember to use the same secret set at creation
-    let expectedSignatureHeader = "sha256=" + signature.digest("hex")
+async function getGame(username, OPTIONS) {
+  let id;
 
-    return expectedSignatureHeader === messageSignature
+  try {
+    id = await getID(username, OPTIONS);
+  } catch (error) {
+    console.log("id not found", error);
+  }
+
+  if (id) {
+    const url = `https://api.twitch.tv/helix/channels?broadcaster_id=${id}`;
+    try {
+        const response = await fetch(url, OPTIONS);
+        const result = await response.json();
+        if (result && result.data && result.data.length > 0) {
+            return result.data[0].game_name;
+        } else {
+            return undefined;
+        }
+    } catch (error) {
+      console.error(error.message);
+    }
+  }
+}
+
+async function shoutOut(username, OPTIONS) {
+    const game = await getGame(username, OPTIONS);
+    return `You should checkout ${username}! They stream ${ game }.`;
 }
 
 module.exports = {
     buildLinks,
     getID,
-    verifySignature
+    shoutOut
 }
